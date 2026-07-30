@@ -484,101 +484,53 @@ SERVEOF
 fi
 
 # ============================================================
-# 12. 快捷查询
+# 12. 安装节点管理工具 (sbx)
 # ============================================================
-cat > /usr/local/bin/vps-info << 'INFOEOF'
-#!/bin/sh
-echo ""
-echo "========== 代理信息 =========="
-echo ""
-INFOEOF
 
-case "$PROTOCOL" in
-    vless-reality)
-        cat >> /usr/local/bin/vps-info << INFOEOF
-echo "协议:      VLESS + Reality"
-echo "公网 IP:   $IP"
-echo "端口:      $node_external (内网: $node_internal)"
-echo "SSH:       $ssh_external (内网: $ssh_internal)"
-echo "UUID:      $UUID"
-echo "PublicKey: $PUBLIC_KEY"
-echo "ShortID:   $SHORT_ID"
-echo "SNI:       $SNI"
-echo ""
-echo "客户端链接:"
-echo "vless://$UUID@$IP:$node_external?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORT_ID&type=tcp#NAT-${PROTOCOL}"
-echo ""
-INFOEOF
-        ;;
-    vless-ws)
-        cat >> /usr/local/bin/vps-info << INFOEOF
-echo "协议:      VLESS + WebSocket + TLS"
-echo "域名:      $DOMAIN"
-echo "端口:      $node_external"
-echo "UUID:      $UUID"
-echo "WS 路径:   ${WS_PATH:-/vless}"
-echo ""
-echo "客户端链接:"
-echo "vless://$UUID@$DOMAIN:$node_external?encryption=none&security=tls&type=ws&path=${WS_PATH:-/vless}&host=$DOMAIN&sni=$DOMAIN#NAT-${PROTOCOL}"
-echo ""
-INFOEOF
-        ;;
-    vless-tcp)
-        cat >> /usr/local/bin/vps-info << INFOEOF
-echo "协议:      VLESS + TCP + TLS"
-echo "域名:      $DOMAIN"
-echo "端口:      $node_external"
-echo "UUID:      $UUID"
-echo ""
-echo "客户端链接:"
-echo "vless://$UUID@$DOMAIN:$node_external?encryption=none&security=tls&type=tcp&sni=$DOMAIN#NAT-${PROTOCOL}"
-echo ""
-INFOEOF
-        ;;
-    hysteria2)
-        cat >> /usr/local/bin/vps-info << INFOEOF
-echo "协议:      Hysteria2"
-echo "公网 IP:   $IP"
-echo "端口:      $node_external (内网: $node_internal)"
-echo "密码:      $PASSWORD"
-echo "SNI:       ${SNI:-www.bing.com}"
-echo ""
-echo "客户端链接:"
-echo "hy2://$PASSWORD@$IP:$node_external?insecure=1&sni=${SNI:-www.bing.com}#NAT-${PROTOCOL}"
-echo ""
-INFOEOF
-        ;;
-    shadowsocks)
-        cat >> /usr/local/bin/vps-info << INFOEOF
-echo "协议:      Shadowsocks (无加密)"
-echo "公网 IP:   $IP"
-echo "端口:      $node_external (内网: $node_internal)"
-echo "密码:      $PASSWORD"
-echo ""
-echo "客户端链接:"
-echo "ss://$(printf '%s' "none:$PASSWORD" | base64 | tr -d '\n')@$IP:$node_external#NAT-${PROTOCOL}"
-echo ""
-INFOEOF
-        ;;
-    trojan)
-        cat >> /usr/local/bin/vps-info << INFOEOF
-echo "协议:      Trojan + TLS"
-echo "域名:      $DOMAIN"
-echo "端口:      $node_external"
-echo "密码:      $PASSWORD"
-echo ""
-echo "客户端链接:"
-echo "trojan://$PASSWORD@$DOMAIN:$node_external?security=tls&sni=$DOMAIN#NAT-${PROTOCOL}"
-echo ""
-INFOEOF
-        ;;
-esac
+# 写入节点元数据
+cat > /etc/sing-box/nodes.conf << NODEOF
+# NAT VPS 节点元数据 — 由 sbx 管理，请勿手动编辑
+NODE_COUNT=1
+NODE_0_NAME='NAT-${PROTOCOL}'
+NODE_0_PROTO='${PROTOCOL}'
+NODE_0_PORT_INTERNAL='${node_internal}'
+NODE_0_PORT_EXTERNAL='${node_external}'
+NODE_0_UUID='${UUID}'
+NODE_0_PASSWORD='${PASSWORD}'
+NODE_0_SNI='${SNI}'
+NODE_0_DOMAIN='${DOMAIN}'
+NODE_0_WS_PATH='${WS_PATH:-/vless}'
+NODE_0_TLS_CERT='${CERT_DIR:-}/fullchain.pem'
+NODE_0_TLS_KEY='${CERT_DIR:-}/key.pem'
+NODE_0_PUBLIC_KEY='${PUBLIC_KEY}'
+NODE_0_PRIVATE_KEY='${PRIVATE_KEY}'
+NODE_0_SHORT_ID='${SHORT_ID}'
+NODE_0_IP='${IP}'
+NODEOF
+
+# 安装 sbx 管理命令
+printf "${BLUE}  安装 sbx 管理工具...${PLAIN}\n"
+SBX_URL="https://raw.githubusercontent.com/shali10/nat-vless-installer/main/sbx.sh"
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$SBX_URL" -o /usr/local/bin/sbx 2>/dev/null || true
+elif command -v wget >/dev/null 2>&1; then
+    wget -q "$SBX_URL" -O /usr/local/bin/sbx 2>/dev/null || true
+fi
+if [ -s /usr/local/bin/sbx ]; then
+    chmod +x /usr/local/bin/sbx
+    # vps-info 作为兼容别名
+    ln -sf /usr/local/bin/sbx /usr/local/bin/vps-info
+    printf "${GREEN}  ✅ sbx 已安装${PLAIN}\n"
+else
+    printf "${YELLOW}  ⚠️  sbx 下载失败, 稍后可手动安装${PLAIN}\n"
+fi
+
 # ============================================================
 # 完成
 # ============================================================
 printf "\n${GREEN}============================================================${PLAIN}\n"
 printf "${GREEN}✅ 安装成功 — ${PROTOCOL}${PLAIN}\n"
-printf "${GREEN}  输入 ${YELLOW}vps-info${GREEN} 查看链接${PLAIN}\n"
+printf "${GREEN}  输入 ${YELLOW}sbx${GREEN} 管理节点 | ${YELLOW}sbx info${GREEN} 查看链接${PLAIN}\n"
 
 if [ "$INIT_SYS" = "systemd" ]; then
     printf "${GREEN}   管理: ${YELLOW}systemctl {start|stop|restart|status} sing-box${PLAIN}\n"
