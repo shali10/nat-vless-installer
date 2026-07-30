@@ -163,6 +163,23 @@ ssh_internal=$(echo "$ssh_input" | cut -d'/' -f1)
 ssh_external=$(echo "$ssh_input" | cut -d'/' -f2)
 
 # ============================================================
+# 多用户配置
+# ============================================================
+USER_COUNT=1
+if [ -n "$WHIPTAIL_CMD" ]; then
+    user_input=$(eval "$WHIPTAIL_CMD" --input-box "用户数量" "生成几个用户？每个用户有独立的 UUID/密码" "1" 2>&1 /dev/tty | grep -oE '^[0-9]+$')
+    [ -n "$user_input" ] && USER_COUNT=$user_input
+else
+    printf "${YELLOW}用户数量 (默认 1): ${PLAIN}"
+    read -r user_input
+    [ -n "$user_input" ] && USER_COUNT=$user_input
+fi
+[ "$USER_COUNT" -lt 1 ] && USER_COUNT=1
+if [ "$USER_COUNT" -gt 1 ]; then
+    printf "${BLUE}→ 用户数: ${USER_COUNT}，将生成多个 UUID/密码${PLAIN}\n\n"
+fi
+
+# ============================================================
 # SNI 选择 (TUI 菜单)
 # ============================================================
 if [ "$PROTOCOL" = "vless-reality" ]; then
@@ -296,8 +313,12 @@ rm -rf /tmp/sing-box.tar.gz "/tmp/sing-box-${VERSION}-linux-${SINGBOX_ARCH}${LIB
 # 7. 公网 IP
 # ============================================================
 printf "${BLUE}[4/8] 获取公网 IP...${PLAIN}\n"
-IP=$(curl -s4 --connect-timeout 5 icanhazip.com || curl -s4 --connect-timeout 5 ip.sb || curl -s4 --connect-timeout 5 api.ipify.org)
+IP4=$(curl -s4 --connect-timeout 5 icanhazip.com || curl -s4 --connect-timeout 5 ip.sb || curl -s4 --connect-timeout 5 api.ipify.org)
+IP6=$(curl -s6 --connect-timeout 5 icanhazip.com 2>/dev/null || curl -s6 --connect-timeout 5 ip.sb 2>/dev/null || curl -s6 --connect-timeout 5 api.ipify.org 2>/dev/null || echo "")
+IP=${IP4:-$IP6}
 [ -z "$IP" ] && { printf "${RED}无法获取公网 IP${PLAIN}\n"; exit 1; }
+[ -n "$IP4" ] && printf "${BLUE}  IPv4: ${IP4}${PLAIN}\n"
+[ -n "$IP6" ] && printf "${BLUE}  IPv6: ${IP6}${PLAIN}\n"
 
 # ============================================================
 # 8. TLS 证书
@@ -351,7 +372,39 @@ printf "${BLUE}[6/8] 生成配置...${PLAIN}\n"
     printf "${RED}sing-box 不可执行${PLAIN}\n"; exit 1
 }
 
-UUID=$(/usr/local/bin/sing-box generate uuid 2>/dev/null || cat /proc/sys/kernel/random/uuid)
+# 生成多用户凭证
+GEN_UUID_CMD="/usr/local/bin/sing-box generate uuid"
+UUID_LIST=""; PASSWORD_LIST=""
+for i in $(seq 1 $USER_COUNT); do
+    u=$($GEN_UUID_CMD 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(date +%s)-$$-$i")
+    p=$(openssl rand -base64 16 | tr -d '=+/')
+    [ -n "$UUID_LIST" ] && UUID_LIST="${UUID_LIST},"
+    [ -n "$PASSWORD_LIST" ] && PASSWORD_LIST="${PASSWORD_LIST},"
+    UUID_LIST="${UUID_LIST}${u}"
+    PASSWORD_LIST="${PASSWORD_LIST}${p}"
+done
+UUID=$(echo "$UUID_LIST" | cut -d',' -f1)
+PASSWORD=$(echo "$PASSWORD_LIST" | cut -d',' -f1)
+
+# 辅助: 生成 users JSON 数组 (用于多用户配置)
+build_users_json() {
+    local proto="$1"
+    local result="" sep=""
+    if [ "$proto" = "vless-reality" ]; then
+        for u in $(echo "$UUID_LIST" | tr ',' ' '); do
+            result="${result}${sep}{\"uuid\":\"$u\",\"flow\":\"xtls-rprx-vision\"}"; sep=","
+        done
+    elif [ "$proto" = "vless-ws" ] || [ "$proto" = "vless-tcp" ]; then
+        for u in $(echo "$UUID_LIST" | tr ',' ' '); do
+            result="${result}${sep}{\"uuid\":\"$u\"}"; sep=","
+        done
+    elif [ "$proto" = "hysteria2" ] || [ "$proto" = "trojan" ] || [ "$proto" = "shadowsocks" ]; then
+        for p in $(echo "$PASSWORD_LIST" | tr ',' ' '); do
+            result="${result}${sep}{\"password\":\"$p\"}"; sep=","
+        done
+    fi
+    printf '%s' "[$result]"
+}
 
 if [ "$PROTOCOL" = "hysteria2" ]; then
     CERT_DIR="/etc/sing-box/certs"; mkdir -p "$CERT_DIR"
@@ -370,33 +423,33 @@ case "$PROTOCOL" in
         PUBLIC_KEY=$(echo "$KEYPAIR"  | grep 'PublicKey'  | awk '{print $2}')
         SHORT_ID=$(openssl rand -hex 4)
         cat > /etc/sing-box/config.json << EOF
-{"log":{"level":"warn"},"inbounds":[{"type":"vless","tag":"in","listen":"0.0.0.0","listen_port":$node_internal,"users":[{"uuid":"$UUID","flow":"xtls-rprx-vision"}],"tls":{"enabled":true,"server_name":"$SNI","reality":{"enabled":true,"handshake":{"server":"$SNI:443"},"private_key":"$PRIVATE_KEY","short_id":["$SHORT_ID"]}}}],"outbounds":[{"type":"direct","tag":"direct"}]}
+{"log":{"level":"warn"},"inbounds":[{"type":"vless","tag":"in","listen":"0.0.0.0","listen_port":$node_internal,"users":$(build_users_json "$PROTOCOL"),"tls":{"enabled":true,"server_name":"$SNI","reality":{"enabled":true,"handshake":{"server":"$SNI:443"},"private_key":"$PRIVATE_KEY","short_id":["$SHORT_ID"]}}}],"outbounds":[{"type":"direct","tag":"direct"}]}
 EOF
         ;;
     vless-ws)
         cat > /etc/sing-box/config.json << EOF
-{"log":{"level":"warn"},"inbounds":[{"type":"vless","tag":"in","listen":"0.0.0.0","listen_port":$node_internal,"users":[{"uuid":"$UUID"}],"tls":{"enabled":true,"server_name":"$DOMAIN","key_path":"$CERT_DIR/key.pem","certificate_path":"$CERT_DIR/fullchain.pem"},"transport":{"type":"ws","path":"${WS_PATH:-/vless}"}}],"outbounds":[{"type":"direct","tag":"direct"}]}
+{"log":{"level":"warn"},"inbounds":[{"type":"vless","tag":"in","listen":"0.0.0.0","listen_port":$node_internal,"users":$(build_users_json "$PROTOCOL"),"tls":{"enabled":true,"server_name":"$DOMAIN","key_path":"$CERT_DIR/key.pem","certificate_path":"$CERT_DIR/fullchain.pem"},"transport":{"type":"ws","path":"${WS_PATH:-/vless}"}}],"outbounds":[{"type":"direct","tag":"direct"}]}
 EOF
         ;;
     vless-tcp)
         cat > /etc/sing-box/config.json << EOF
-{"log":{"level":"warn"},"inbounds":[{"type":"vless","tag":"in","listen":"0.0.0.0","listen_port":$node_internal,"users":[{"uuid":"$UUID"}],"tls":{"enabled":true,"server_name":"$DOMAIN","key_path":"$CERT_DIR/key.pem","certificate_path":"$CERT_DIR/fullchain.pem"}}],"outbounds":[{"type":"direct","tag":"direct"}]}
+{"log":{"level":"warn"},"inbounds":[{"type":"vless","tag":"in","listen":"0.0.0.0","listen_port":$node_internal,"users":$(build_users_json "$PROTOCOL"),"tls":{"enabled":true,"server_name":"$DOMAIN","key_path":"$CERT_DIR/key.pem","certificate_path":"$CERT_DIR/fullchain.pem"}}],"outbounds":[{"type":"direct","tag":"direct"}]}
 EOF
         ;;
     hysteria2)
         cat > /etc/sing-box/config.json << EOF
-{"log":{"level":"warn"},"inbounds":[{"type":"hysteria2","tag":"hy2-in","listen":"0.0.0.0","listen_port":$node_internal,"users":[{"password":"$PASSWORD"}],"tls":{"enabled":true,"server_name":"${SNI:-www.bing.com}","key_path":"$CERT_DIR/key.pem","certificate_path":"$CERT_DIR/fullchain.pem"},"masquerade":"https://www.bing.com"}],"outbounds":[{"type":"direct","tag":"direct"}]}
+{"log":{"level":"warn"},"inbounds":[{"type":"hysteria2","tag":"hy2-in","listen":"0.0.0.0","listen_port":$node_internal,"users":$(build_users_json "$PROTOCOL"),"tls":{"enabled":true,"server_name":"${SNI:-www.bing.com}","key_path":"$CERT_DIR/key.pem","certificate_path":"$CERT_DIR/fullchain.pem"},"masquerade":"https://www.bing.com"}],"outbounds":[{"type":"direct","tag":"direct"}]}
 EOF
         ;;
     shadowsocks)
         METHOD="none"
         cat > /etc/sing-box/config.json << EOF
-{"log":{"level":"warn"},"inbounds":[{"type":"shadowsocks","tag":"ss-in","listen":"0.0.0.0","listen_port":$node_internal,"method":"$METHOD","password":"$PASSWORD"}],"outbounds":[{"type":"direct","tag":"direct"}]}
+{"log":{"level":"warn"},"inbounds":[{"type":"shadowsocks","tag":"ss-in","listen":"0.0.0.0","listen_port":$node_internal,"method":"$METHOD","users":$(build_users_json "$PROTOCOL")}],"outbounds":[{"type":"direct","tag":"direct"}]}
 EOF
         ;;
     trojan)
         cat > /etc/sing-box/config.json << EOF
-{"log":{"level":"warn"},"inbounds":[{"type":"trojan","tag":"trojan-in","listen":"0.0.0.0","listen_port":$node_internal,"users":[{"password":"$PASSWORD"}],"tls":{"enabled":true,"server_name":"$DOMAIN","key_path":"$CERT_DIR/key.pem","certificate_path":"$CERT_DIR/fullchain.pem"}}],"outbounds":[{"type":"direct","tag":"direct"}]}
+{"log":{"level":"warn"},"inbounds":[{"type":"trojan","tag":"trojan-in","listen":"0.0.0.0","listen_port":$node_internal,"users":$(build_users_json "$PROTOCOL"),"tls":{"enabled":true,"server_name":"$DOMAIN","key_path":"$CERT_DIR/key.pem","certificate_path":"$CERT_DIR/fullchain.pem"}}],"outbounds":[{"type":"direct","tag":"direct"}]}
 EOF
         ;;
 esac
@@ -495,8 +548,8 @@ NODE_0_NAME='NAT-${PROTOCOL}'
 NODE_0_PROTO='${PROTOCOL}'
 NODE_0_PORT_INTERNAL='${node_internal}'
 NODE_0_PORT_EXTERNAL='${node_external}'
-NODE_0_UUID='${UUID}'
-NODE_0_PASSWORD='${PASSWORD}'
+NODE_0_UUIDS='${UUID_LIST}'
+NODE_0_PASSWORDS='${PASSWORD_LIST}'
 NODE_0_SNI='${SNI}'
 NODE_0_DOMAIN='${DOMAIN}'
 NODE_0_WS_PATH='${WS_PATH:-/vless}'
@@ -505,8 +558,11 @@ NODE_0_TLS_KEY='${CERT_DIR:-}/key.pem'
 NODE_0_PUBLIC_KEY='${PUBLIC_KEY}'
 NODE_0_PRIVATE_KEY='${PRIVATE_KEY}'
 NODE_0_SHORT_ID='${SHORT_ID}'
-NODE_0_IP='${IP}'
+NODE_0_IP4='${IP4}'
+NODE_0_IP6='${IP6}'
 NODEOF
+
+# 检查是否已有 warp.conf (升级安装时保留)
 
 # 安装 sbx 管理命令
 printf "${BLUE}  安装 sbx 管理工具...${PLAIN}\n"
@@ -523,6 +579,86 @@ if [ -s /usr/local/bin/sbx ]; then
     printf "${GREEN}  ✅ sbx 已安装${PLAIN}\n"
 else
     printf "${YELLOW}  ⚠️  sbx 下载失败, 稍后可手动安装${PLAIN}\n"
+fi
+
+# ============================================================
+# 13. Warp 解锁 (可选)
+# ============================================================
+if [ -n "$WHIPTAIL_CMD" ]; then
+    warp_choice=$(eval "$WHIPTAIL_CMD" --title "Warp 解锁" --yesno "添加 Warp 出站以解锁 ChatGPT/Netflix/流媒体？" 8 40 2>&1 /dev/tty; echo $?)
+    warp_yn=; [ "$warp_choice" = "0" ] && warp_yn="y"
+else
+    printf "\n${YELLOW}是否添加 Warp 出站解锁 ChatGPT/Netflix？ (y/N): ${PLAIN}"
+    read -r warp_yn
+fi
+
+if [ "$warp_yn" = "y" ] || [ "$warp_yn" = "Y" ]; then
+    printf "${BLUE}[Warp] 注册 Cloudflare Warp...${PLAIN}\n"
+
+    # 下载 wgcf
+    WGCF_ARCH="$SINGBOX_ARCH"
+    [ "$WGCF_ARCH" = "armv7" ] && WGCF_ARCH="arm"
+    WGCF_URL="https://github.com/ViRb3/wgcf/releases/latest/download/wgcf_2.2.22_linux_${WGCF_ARCH}"
+    if ! wget -q -O /tmp/wgcf "$WGCF_URL" 2>/dev/null; then
+        printf "${YELLOW}  wgcf 下载失败，跳过 Warp 设置${PLAIN}\n"
+    else
+        chmod +x /tmp/wgcf
+        cd /tmp
+        /tmp/wgcf register --accept-tos >/dev/null 2>&1 || { printf "${YELLOW}  Warp 注册失败${PLAIN}\n"; rm -f /tmp/wgcf; }
+        if [ -f wgcf-account.toml ]; then
+            /tmp/wgcf generate >/dev/null 2>&1 || true
+        fi
+        if [ -f wgcf-profile.conf ]; then
+            printf "${BLUE}[Warp] 提取 WireGuard 参数...${PLAIN}\n"
+            WG_PRIV=$(grep '^PrivateKey' wgcf-profile.conf | head -1 | awk '{print $3}')
+            WG_ADDR=$(grep '^Address' wgcf-profile.conf | head -1 | awk '{print $3}')
+            WG_PUB=$(grep '^PublicKey' wgcf-profile.conf | head -1 | awk '{print $3}')
+            WG_EP=$(grep '^Endpoint' wgcf-profile.conf | head -1 | awk '{print $3}')
+            WG_PORT=$(echo "$WG_EP" | cut -d: -f2)
+            WG_SERVER=$(echo "$WG_EP" | cut -d: -f1)
+            WG_RESERVED=$(grep -o 'ReservedBit.*=[^0-9]*[0-9,]*' wgcf-profile.conf 2>/dev/null | grep -oE '[0-9,]+' || echo "0,0,0")
+
+            # 保存 Warp 配置
+            cat > /etc/sing-box/warp.conf << WEOF
+WARP_ENABLED=true
+WARP_PRIVATE_KEY='$WG_PRIV'
+WARP_ADDRESS='$WG_ADDR'
+WARP_PUBLIC_KEY='$WG_PUB'
+WARP_SERVER='$WG_SERVER'
+WARP_PORT='$WG_PORT'
+WARP_RESERVED='$WG_RESERVED'
+WEOF
+
+            rm -f /tmp/wgcf wgcf-profile.conf wgcf-account.toml 2>/dev/null || true
+
+            # 注入 Sing-box 配置
+            printf "${BLUE}[Warp] 注入 Sing-box 配置...${PLAIN}\n"
+            WARPOUT='{"type":"wireguard","tag":"warp","server":"'$WG_SERVER'","server_port":'$WG_PORT',"local_address":["'$WG_ADDR'"],"private_key":"'$WG_PRIV'","peer_public_key":"'$WG_PUB'","reserved":['$WG_RESERVED'],"mtu":1420}'
+            WARP_RULE='{"domain_suffix":["openai.com","chatgpt.com","ai.com","netflix.com","nflxvideo.net","nflximg.net","youtube.com","googlevideo.com","disneyplus.com","bbc.co.uk","tvb.com","hbo.com","max.com","spotify.com","abema.tv"],"outbound":"warp"}'
+            sed -i 's|"outbounds":\[{"type":"direct","tag":"direct"}\]|"outbounds":[{"type":"direct","tag":"direct"},'"$WARPOUT"'],"route":{"rules":['"$WARP_RULE"']}|' /etc/sing-box/config.json 2>/dev/null || true
+
+            if /usr/local/bin/sing-box check -c /etc/sing-box/config.json >/dev/null 2>&1; then
+                printf "${GREEN}  ✅ Warp 已启用 (解锁 ChatGPT + Netflix + YouTube + 主流流媒体)${PLAIN}\n"
+                echo "NODE_0_WARP=true" >> /etc/sing-box/nodes.conf
+                # 重启服务
+                if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+                    systemctl restart sing-box 2>/dev/null || true
+                elif command -v rc-service >/dev/null 2>&1; then
+                    rc-service sing-box restart 2>/dev/null || true
+                fi
+                printf "${GREEN}  ✅ 服务已重启${PLAIN}\n"
+            else
+                printf "${RED}  Warp 配置校验失败，已回滚${PLAIN}\n"
+                # Regenerate without warp
+                sed -i 's|,"outbounds":\[{"type":"direct","tag":"direct"},"type":"wireguard".*"route":{.*}||' /etc/sing-box/config.json 2>/dev/null || true
+                rm -f /etc/sing-box/warp.conf
+            fi
+        else
+            printf "${YELLOW}  Warp 配置生成失败${PLAIN}\n"
+            rm -f /tmp/wgcf 2>/dev/null || true
+        fi
+    fi
+    cd /
 fi
 
 # ============================================================

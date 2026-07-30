@@ -61,9 +61,8 @@ regenerate_config() {
     for i in $(seq 0 $((NODE_COUNT - 1))); do
         eval "proto=\$NODE_${i}_PROTO" 2>/dev/null || continue
         eval "port=\$NODE_${i}_PORT_INTERNAL"
-        eval "iport=\$NODE_${i}_PORT_EXTERNAL"
-        eval "uuid=\$NODE_${i}_UUID"
-        eval "pass=\$NODE_${i}_PASSWORD"
+        eval "uuids=\$NODE_${i}_UUIDS"
+        eval "passwords=\$NODE_${i}_PASSWORDS"
         eval "sni=\$NODE_${i}_SNI"
         eval "domain=\$NODE_${i}_DOMAIN"
         eval "wspath=\$NODE_${i}_WS_PATH"
@@ -72,29 +71,73 @@ regenerate_config() {
         eval "sid=\$NODE_${i}_SHORT_ID"
 
         local tag="node-$i"
+
+        # Build users JSON array
+        local users_json="" useq=""
+        if [ "$proto" = "vless-reality" ]; then
+            for u in $(echo "$uuids" | tr ',' ' '); do
+                users_json="${users_json}${useq}{\"uuid\":\"$u\",\"flow\":\"xtls-rprx-vision\"}"; useq=","
+            done
+        elif [ "$proto" = "vless-ws" ] || [ "$proto" = "vless-tcp" ]; then
+            for u in $(echo "$uuids" | tr ',' ' '); do
+                users_json="${users_json}${useq}{\"uuid\":\"$u\"}"; useq=","
+            done
+        elif [ "$proto" = "shadowsocks" ]; then
+            for p in $(echo "$passwords" | tr ',' ' '); do
+                users_json="${users_json}${useq}{\"password\":\"$p\"}"; useq=","
+            done
+        elif [ "$proto" = "hysteria2" ] || [ "$proto" = "trojan" ]; then
+            for p in $(echo "$passwords" | tr ',' ' '); do
+                users_json="${users_json}${useq}{\"password\":\"$p\"}"; useq=","
+            done
+        fi
+        [ -z "$users_json" ] && users_json='[{"uuid":"placeholder"}]'
+
+        local line
         case "$proto" in
             vless-reality)
                 [ -z "$sni" ] && sni="www.icloud.com"
-                line="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":[{\"uuid\":\"$uuid\",\"flow\":\"xtls-rprx-vision\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$sni\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni:443\"},\"private_key\":\"$priv\",\"short_id\":[\"$sid\"]}}}"
+                line="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":${users_json},\"tls\":{\"enabled\":true,\"server_name\":\"$sni\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$sni:443\"},\"private_key\":\"$priv\",\"short_id\":[\"$sid\"]}}}"
                 ;;
             vless-ws)
-                line="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"key_path\":\"$CERT_DIR/key.pem\",\"certificate_path\":\"$CERT_DIR/fullchain.pem\"},\"transport\":{\"type\":\"ws\",\"path\":\"${wspath:-/vless}\"}}"
+                line="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":${users_json},\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"key_path\":\"$CERT_DIR/key.pem\",\"certificate_path\":\"$CERT_DIR/fullchain.pem\"},\"transport\":{\"type\":\"ws\",\"path\":\"${wspath:-/vless}\"}}"
+                ;;
+            vless-tcp)
+                line="{\"type\":\"vless\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":${users_json},\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"key_path\":\"$CERT_DIR/key.pem\",\"certificate_path\":\"$CERT_DIR/fullchain.pem\"}}"
                 ;;
             hysteria2)
-                line="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":[{\"password\":\"$pass\"}],\"tls\":{\"enabled\":true,\"server_name\":\"${sni:-www.bing.com}\",\"key_path\":\"$CERT_DIR/key.pem\",\"certificate_path\":\"$CERT_DIR/fullchain.pem\"},\"masquerade\":\"https://www.bing.com\"}"
+                line="{\"type\":\"hysteria2\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":${users_json},\"tls\":{\"enabled\":true,\"server_name\":\"${sni:-www.bing.com}\",\"key_path\":\"$CERT_DIR/key.pem\",\"certificate_path\":\"$CERT_DIR/fullchain.pem\"},\"masquerade\":\"https://www.bing.com\"}"
                 ;;
             shadowsocks)
-                line="{\"type\":\"shadowsocks\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"method\":\"none\",\"password\":\"$pass\"}"
+                line="{\"type\":\"shadowsocks\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"method\":\"none\",\"users\":${users_json}}"
                 ;;
             trojan)
-                line="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":[{\"password\":\"$pass\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"key_path\":\"$CERT_DIR/key.pem\",\"certificate_path\":\"$CERT_DIR/fullchain.pem\"}}"
+                line="{\"type\":\"trojan\",\"tag\":\"$tag\",\"listen\":\"0.0.0.0\",\"listen_port\":$port,\"users\":${users_json},\"tls\":{\"enabled\":true,\"server_name\":\"$domain\",\"key_path\":\"$CERT_DIR/key.pem\",\"certificate_path\":\"$CERT_DIR/fullchain.pem\"}}"
                 ;;
             *) continue ;;
         esac
         inbounds="${inbounds}${sep}${line}"; sep=","
     done
 
-    printf '{"log":{"level":"warn"},"inbounds":[%s],"outbounds":[{"type":"direct","tag":"direct"}]}\n' "$inbounds" > "$CONFIG"
+    # Check for Warp
+    local warp_extra=""
+    if [ -f /etc/sing-box/warp.conf ]; then
+        . /etc/sing-box/warp.conf 2>/dev/null || true
+        if [ "$WARP_ENABLED" = "true" ] && [ -n "$WARP_PRIVATE_KEY" ]; then
+            warp_extra=',{"type":"wireguard","tag":"warp","server":"'"$WARP_SERVER"'","server_port":'"$WARP_PORT"',"local_address":["'"$WARP_ADDRESS"'"],"private_key":"'"$WARP_PRIVATE_KEY"'","peer_public_key":"'"$WARP_PUBLIC_KEY"'","reserved":['"$WARP_RESERVED"'],"mtu":1420}'
+        fi
+    fi
+
+    # Build base config
+    local route_section=""
+    if [ -n "$warp_extra" ]; then
+        local warp_rule='{"domain_suffix":["openai.com","chatgpt.com","ai.com","netflix.com","nflxvideo.net","nflximg.net","youtube.com","googlevideo.com","disneyplus.com","bbc.co.uk","tvb.com","hbo.com","max.com","spotify.com","abema.tv"],"outbound":"warp"}'
+        route_section=',"route":{"rules":['"$warp_rule"']}'
+    fi
+
+    printf '{"log":{"level":"warn"},"inbounds":[%s],"outbounds":[{"type":"direct","tag":"direct"}%s]%s}\n' \
+        "$inbounds" "$warp_extra" "$route_section" > "$CONFIG"
+
     if ! "$SBIN" check -c "$CONFIG" >/dev/null 2>&1; then
         _err "配置文件校验失败！"; return 1
     fi
@@ -210,8 +253,12 @@ add_node() {
     [ -z "$name" ] && name="node-$idx"
 
     # Generate keys
-    local uuid=""; local password=""; local sni="" domain="" wspath=""
-    uuid=$("$SBIN" generate uuid 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "$(date +%s)-$$-RANDOM")
+    local uuid_list=""; local password_list=""; local sni="" domain="" wspath=""
+    # Generate one set by default; sbx add can be extended for multi-user
+    local single_uuid=$("$SBIN" generate uuid 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "$(date +%s)-$$")
+    local single_pass=$(openssl rand -base64 16 | tr -d '=+/')
+    uuid_list="$single_uuid"
+    password_list="$single_pass"
 
     if [ "$proto" = "vless-reality" ]; then
         local sni_choice
@@ -262,98 +309,135 @@ add_node() {
     fi
 
     # Save to nodes.conf
-    local ip=$(curl -s4 --connect-timeout 5 icanhazip.com 2>/dev/null || curl -s4 --connect-timeout 5 ip.sb 2>/dev/null || curl -s4 --connect-timeout 5 api.ipify.org 2>/dev/null || echo "")
+    local ip4=$(curl -s4 --connect-timeout 5 icanhazip.com 2>/dev/null || curl -s4 --connect-timeout 5 ip.sb 2>/dev/null || curl -s4 --connect-timeout 5 api.ipify.org 2>/dev/null || echo "")
+    local ip6=$(curl -s6 --connect-timeout 5 icanhazip.com 2>/dev/null || curl -s6 --connect-timeout 5 ip.sb 2>/dev/null || curl -s6 --connect-timeout 5 api.ipify.org 2>/dev/null || echo "")
     save_node "$idx" \
         "NAME='$name'" \
         "PROTO='$proto'" \
         "PORT_INTERNAL='$node_internal'" \
         "PORT_EXTERNAL='$node_external'" \
-        "UUID='$uuid'" \
-        "PASSWORD='$password'" \
+        "UUIDS='$uuid_list'" \
+        "PASSWORDS='$password_list'" \
         "SNI='$sni'" \
         "DOMAIN='$domain'" \
         "WS_PATH='$wspath'" \
         "PUBLIC_KEY='$pub_key'" \
         "PRIVATE_KEY='$priv_key'" \
         "SHORT_ID='$short_id'" \
-        "IP='$ip'"
+        "IP4='$ip4'" \
+        "IP6='$ip6'"
 
     # Regenerate config
     regenerate_config
     _ok "节点 '$name' ($proto) 已添加，端口: ${node_internal}/${node_external}"
 }
 
-# ---- Show node info / links ----
+# ---- Show node info / links (dual-stack + multi-user) ----
 show_info() {
     load_nodes
     if [ "$NODE_COUNT" -eq 0 ]; then _err "没有节点"; return 1; fi
 
     for i in $(seq 0 $((NODE_COUNT - 1))); do
         eval "n=\$NODE_${i}_NAME; p=\$NODE_${i}_PROTO; pt=\$NODE_${i}_PORT_INTERNAL"
-        eval "pe=\$NODE_${i}_PORT_EXTERNAL; ip=\$NODE_${i}_IP; uuid=\$NODE_${i}_UUID"
-        eval "pass=\$NODE_${i}_PASSWORD; sni=\$NODE_${i}_SNI; domain=\$NODE_${i}_DOMAIN"
+        eval "pe=\$NODE_${i}_PORT_EXTERNAL; ip4=\$NODE_${i}_IP4; ip6=\$NODE_${i}_IP6"
+        eval "uuids=\$NODE_${i}_UUIDS; passwords=\$NODE_${i}_PASSWORDS"
+        eval "sni=\$NODE_${i}_SNI; domain=\$NODE_${i}_DOMAIN"
         eval "wsp=\$NODE_${i}_WS_PATH; pubk=\$NODE_${i}_PUBLIC_KEY; sid=\$NODE_${i}_SHORT_ID"
+
+        [ -z "$ip4" ] && ip4=$(curl -s4 icanhazip.com 2>/dev/null || echo "")
+        [ -z "$ip6" ] && ip6=$(curl -s6 icanhazip.com 2>/dev/null || echo "")
+
+        local first_uuid=$(echo "$uuids" | cut -d',' -f1)
+        local first_pass=$(echo "$passwords" | cut -d',' -f1)
 
         echo ""
         printf "${GREEN}====== %s (%s) ======${NC}\n" "$n" "$p"
+
         case "$p" in
             vless-reality)
                 echo "协议:     VLESS + Reality"
-                echo "地址/端口: $ip:$pe (内网: $pt)"
-                echo "UUID:     $uuid"
+                echo "公网:     IPv4 ${ip4:-无}"
+                [ -n "$ip6" ] && echo "          IPv6 ${ip6}"
+                echo "端口:     $pe (内网: $pt)"
+                user_count=$(echo "$uuids" | tr ',' ' ' | wc -w)
+                echo "用户数:   $user_count"
+                echo "UUID:     $(echo "$uuids" | cut -d',' -f1)"
                 echo "SNI:      $sni"
                 echo "PublicKey: $pubk"
                 echo "ShortID:  $sid"
                 echo ""
                 echo "链接:"
-                echo "vless://$uuid@$ip:$pe?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$sni&fp=chrome&pbk=$pubk&sid=$sid&type=tcp#${n}"
+                echo "vless://$first_uuid@$ip4:$pe?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$sni&fp=chrome&pbk=$pubk&sid=$sid&type=tcp#${n}-v4"
+                [ -n "$ip6" ] && echo "vless://$first_uuid@[${ip6}]:$pe?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$sni&fp=chrome&pbk=$pubk&sid=$sid&type=tcp#${n}-v6"
+                if [ "$user_count" -gt 1 ]; then
+                    echo ""
+                    echo "其他 UUID:"
+                    for u in $(echo "$uuids" | tr ',' ' ' | tail -n +2); do
+                        echo "  $u"
+                    done
+                fi
                 ;;
             vless-ws)
                 echo "协议:     VLESS + WebSocket + TLS"
-                echo "域名/端口: $domain:$pe"
-                echo "UUID:     $uuid"
+                echo "域名:     $domain"
+                echo "端口:     $pe"
+                echo "UUID:     $first_uuid"
                 echo "WS 路径:  ${wsp:-/vless}"
                 echo ""
                 echo "链接:"
-                echo "vless://$uuid@$domain:$pe?encryption=none&security=tls&type=ws&path=${wsp:-/vless}&host=$domain&sni=$domain#${n}"
+                echo "vless://$first_uuid@$domain:$pe?encryption=none&security=tls&type=ws&path=${wsp:-/vless}&host=$domain&sni=$domain#${n}"
                 ;;
             vless-tcp)
                 echo "协议:     VLESS + TCP + TLS"
-                echo "域名/端口: $domain:$pe"
-                echo "UUID:     $uuid"
+                echo "域名:     $domain"
+                echo "端口:     $pe"
+                echo "UUID:     $first_uuid"
                 echo ""
                 echo "链接:"
-                echo "vless://$uuid@$domain:$pe?encryption=none&security=tls&type=tcp&sni=$domain#${n}"
+                echo "vless://$first_uuid@$domain:$pe?encryption=none&security=tls&type=tcp&sni=$domain#${n}"
                 ;;
             hysteria2)
                 echo "协议:     Hysteria2"
-                echo "地址/端口: $ip:$pe (内网: $pt)"
-                echo "密码:     $pass"
+                echo "公网:     IPv4 ${ip4:-无}"
+                [ -n "$ip6" ] && echo "          IPv6 ${ip6}"
+                echo "端口:     $pe (内网: $pt)"
+                echo "密码:     $first_pass"
                 echo "SNI:      ${sni:-www.bing.com}"
                 echo ""
                 echo "链接:"
-                echo "hy2://$pass@$ip:$pe?insecure=1&sni=${sni:-www.bing.com}#${n}"
+                echo "hy2://$first_pass@$ip4:$pe?insecure=1&sni=${sni:-www.bing.com}#${n}-v4"
+                [ -n "$ip6" ] && echo "hy2://$first_pass@[${ip6}]:$pe?insecure=1&sni=${sni:-www.bing.com}#${n}-v6"
                 ;;
             shadowsocks)
                 echo "协议:     Shadowsocks (无加密)"
-                echo "地址/端口: $ip:$pe (内网: $pt)"
-                echo "密码:     $pass"
+                echo "公网:     IPv4 ${ip4:-无}"
+                [ -n "$ip6" ] && echo "          IPv6 ${ip6}"
+                echo "端口:     $pe (内网: $pt)"
+                echo "密码:     $first_pass"
                 echo ""
-                local b64=$(printf '%s' "none:$pass" | base64 | tr -d '\n' | sed 's/=//g')
+                local b64=$(printf '%s' "none:$first_pass" | base64 | tr -d '\n')
                 echo "链接:"
-                echo "ss://${b64}@${ip}:${pe}#${n}"
+                echo "ss://${b64}@${ip4}:${pe}#${n}-v4"
+                [ -n "$ip6" ] && echo "ss://${b64}@[${ip6}]:${pe}#${n}-v6"
                 ;;
             trojan)
                 echo "协议:     Trojan + TLS"
-                echo "域名/端口: $domain:$pe"
-                echo "密码:     $pass"
+                echo "域名:     $domain"
+                echo "端口:     $pe"
+                echo "密码:     $first_pass"
                 echo ""
                 echo "链接:"
-                echo "trojan://$pass@$domain:$pe?security=tls&sni=$domain#${n}"
+                echo "trojan://$first_pass@$domain:$pe?security=tls&sni=$domain#${n}"
                 ;;
         esac
         echo ""
     done
+
+    # Check Warp status
+    if [ -f /etc/sing-box/warp.conf ]; then
+        . /etc/sing-box/warp.conf 2>/dev/null || true
+        [ "$WARP_ENABLED" = "true" ] && printf "${GREEN}🌐 Warp 解锁: 已启用 (ChatGPT + Netflix + YouTube)${NC}\n"
+    fi
 }
 
 # ---- List nodes (short format) ----
