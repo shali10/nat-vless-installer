@@ -464,7 +464,7 @@ echo "端口:      $node_external (内网: $node_internal)"
 echo "密码:      $PASSWORD"
 echo ""
 echo "客户端链接:"
-echo "ss://$(printf '%s' "none:$PASSWORD" | base64 -w0)@$IP:$node_external#NAT-${PROTOCOL}"
+echo "ss://$(printf '%s' "none:$PASSWORD" | base64 | tr -d '\n')@$IP:$node_external#NAT-${PROTOCOL}"
 echo ""
 INFOEOF
         ;;
@@ -481,26 +481,12 @@ echo ""
 INFOEOF
         ;;
 esac
-chmod +x /usr/local/bin/vps-info
-
-# 生成 vps-info
-if command -v /usr/local/bin/sing-box >/dev/null 2>&1; then
-  cat > /usr/local/bin/vps-info << 'SIMPLEEOF'
-#!/bin/sh
-echo ""
-echo "========== 代理信息 (Sing-box) =========="
-echo ""
-SIMPLEEOF
-  chmod +x /usr/local/bin/vps-info
-fi
-
 # ============================================================
 # 完成
 # ============================================================
 printf "\n${GREEN}============================================================${PLAIN}\n"
 printf "${GREEN}✅ 安装成功 — ${PROTOCOL}${PLAIN}\n"
-printf "${GREEN}${PLAIN}\n"
-printf "${GREEN}   输入 ${YELLOW}vps-info${GREEN} 查看链接${PLAIN}\n"
+printf "${GREEN}  输入 ${YELLOW}vps-info${GREEN} 查看链接${PLAIN}\n"
 
 if [ "$INIT_SYS" = "systemd" ]; then
     printf "${GREEN}   管理: ${YELLOW}systemctl {start|stop|restart|status} sing-box${PLAIN}\n"
