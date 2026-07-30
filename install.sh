@@ -302,7 +302,7 @@ case "$PROTOCOL" in
       "server_name": "$SNI",
       "reality": {
         "enabled": true,
-        "handshake": {"server": "$SNI", "port": 443},
+        "handshake": {"server": "$SNI:443"},
         "private_key": "$PRIVATE_KEY",
         "short_id": ["$SHORT_ID"]
       }
