@@ -35,7 +35,11 @@ VTYPE="KVM/BareMetal"
 grep -q 'container=lxc' /proc/1/environ 2>/dev/null || grep -qa 'lxc' /proc/1/cgroup 2>/dev/null && VTYPE="LXC"
 grep -qa 'docker' /proc/1/cgroup 2>/dev/null && VTYPE="Docker"
 
-printf "${BLUE}[环境] 架构: ${SINGBOX_ARCH} | 虚拟化: ${VTYPE}${PLAIN}\n\n"
+# Alpine / musl 检测（Sing-box 有专用 musl 构建）
+IS_ALPINE=0
+grep -qi 'alpine' /etc/os-release 2>/dev/null && IS_ALPINE=1
+
+printf "${BLUE}[环境] 架构: ${SINGBOX_ARCH} | 虚拟化: ${VTYPE} | libc: $([ $IS_ALPINE -eq 1 ] && echo 'musl' || echo 'glibc')${PLAIN}\n\n"
 
 # ============================================================
 # 2. 协议选择
@@ -108,7 +112,7 @@ if needs_cert; then
     printf "${YELLOW}域名 (已有 A 记录指向本机): ${PLAIN}"
     read DOMAIN
     [ -z "$DOMAIN" ] && { printf "${RED}域名不能为空${PLAIN}\n"; exit 1; }
-    printf "${YELLOW}邮箱 (Let's Encrypt 注册用，默认 admin@${DOMAIN}): ${PLAIN}"
+    printf "${YELLOW}邮箱 (Let's Encrypt 用，默认 admin@${DOMAIN}): ${PLAIN}"
     read EMAIL; EMAIL=${EMAIL:-"admin@${DOMAIN}"}
 fi
 
@@ -140,10 +144,16 @@ rm -rf /usr/local/bin/sing-box /etc/sing-box /usr/local/bin/vps-info /tmp/sing-b
 printf "${BLUE}[2/8] 安装系统依赖...${PLAIN}\n"
 apk update >/dev/null
 apk add --no-cache curl wget tar openssl ca-certificates openrc iptables ip6tables socat >/dev/null 2>&1
+
+# Alpine 上安装 gcompat 以支持 glibc 二进制（备用方案）
+if [ "$IS_ALPINE" = "1" ]; then
+    apk add --no-cache gcompat >/dev/null 2>&1 || true
+fi
+
 mkdir -p /etc/sing-box
 
 # ============================================================
-# 6. 下载 Sing-box
+# 6. 下载 Sing-box (musl for Alpine, glibc for others)
 # ============================================================
 printf "${BLUE}[3/8] 下载 Sing-box...${PLAIN}\n"
 LATEST_TAG=""
@@ -157,14 +167,35 @@ done
 [ -z "$LATEST_TAG" ] && LATEST_TAG="v1.10.1"
 VERSION=${LATEST_TAG#v}
 
-DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/${LATEST_TAG}/sing-box-${VERSION}-linux-${SINGBOX_ARCH}.tar.gz"
+# 选择合适的 libc 变体
+LIBC_VARIANT=""
+[ "$IS_ALPINE" = "1" ] && LIBC_VARIANT="-musl" || LIBC_VARIANT=""
+
+DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/${LATEST_TAG}/sing-box-${VERSION}-linux-${SINGBOX_ARCH}${LIBC_VARIANT}.tar.gz"
+
+printf "${BLUE}  下载: sing-box ${VERSION} (${SINGBOX_ARCH}${LIBC_VARIANT})${PLAIN}\n"
+
 if ! wget -q -O /tmp/sing-box.tar.gz "$DOWNLOAD_URL" || [ ! -s /tmp/sing-box.tar.gz ]; then
-    printf "${RED}下载失败: $DOWNLOAD_URL${PLAIN}\n"; exit 1
+    # musl 下载失败时降级 glibc + gcompat
+    if [ "$IS_ALPINE" = "1" ] && [ -n "$LIBC_VARIANT" ]; then
+        printf "${YELLOW}  musl 构建下载失败，降级 glibc + gcompat${PLAIN}\n"
+        DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/${LATEST_TAG}/sing-box-${VERSION}-linux-${SINGBOX_ARCH}.tar.gz"
+        if ! wget -q -O /tmp/sing-box.tar.gz "$DOWNLOAD_URL" || [ ! -s /tmp/sing-box.tar.gz ]; then
+            printf "${RED}下载失败，请检查网络${PLAIN}\n"; exit 1
+        fi
+    else
+        printf "${RED}下载失败: $DOWNLOAD_URL${PLAIN}\n"; exit 1
+    fi
 fi
+
 tar -zxvf /tmp/sing-box.tar.gz -C /tmp/ >/dev/null
-mv "/tmp/sing-box-${VERSION}-linux-${SINGBOX_ARCH}/sing-box" /usr/local/bin/
+mv "/tmp/sing-box-${VERSION}-linux-${SINGBOX_ARCH}${LIBC_VARIANT}/sing-box" /usr/local/bin/ 2>/dev/null || \
+mv "/tmp/sing-box-${VERSION}-linux-${SINGBOX_ARCH}/sing-box" /usr/local/bin/ 2>/dev/null || {
+    printf "${RED}解压后找不到 sing-box 二进制${PLAIN}\n"; exit 1
+}
 chmod +x /usr/local/bin/sing-box
-rm -rf /tmp/sing-box.tar.gz "/tmp/sing-box-${VERSION}-linux-${SINGBOX_ARCH}"
+rm -rf /tmp/sing-box.tar.gz "/tmp/sing-box-${VERSION}-linux-${SINGBOX_ARCH}${LIBC_VARIANT}"
+rm -rf "/tmp/sing-box-${VERSION}-linux-${SINGBOX_ARCH}" 2>/dev/null || true
 
 # ============================================================
 # 7. 公网 IP
@@ -178,56 +209,46 @@ IP=$(curl -s4 --connect-timeout 5 icanhazip.com || curl -s4 --connect-timeout 5 
 # ============================================================
 if needs_cert; then
     printf "${BLUE}[5/8] 申请 TLS 证书 (Let's Encrypt)...${PLAIN}\n"
-    # 检查域名解析
     DOMAIN_IP=$(curl -sL --connect-timeout 5 "https://cloudflare-dns.com/dns-query?name=${DOMAIN}&type=A" \
         -H "Accept: application/dns-json" 2>/dev/null \
         | sed 's/.*"data":"\([^"]*\)".*/\1/')
     [ -z "$DOMAIN_IP" ] && DOMAIN_IP=$(nslookup "$DOMAIN" 2>/dev/null | awk '/^Address: /{print $2}')
     if [ "$DOMAIN_IP" != "$IP" ]; then
-        printf "${RED}域名 ${DOMAIN} 解析到 ${DOMAIN_IP}，但本机 IP 是 ${IP}${PLAIN}\n"
-        printf "${RED}请先将域名 A 记录指向本机 IP${PLAIN}\n"; exit 1
+        printf "${RED}域名 ${DOMAIN} 解析到 ${DOMAIN_IP:-未知}，本机 IP 为 ${IP}${PLAIN}\n"
+        printf "${RED}请先将域名 A 记录指向本机${PLAIN}\n"; exit 1
     fi
 
-    # 用 sing-box 内置 HTTP 服务完成 acme 验证（临时起一个 HTTP 80 端口验证服务）
-    # 实际使用 acme.sh 更可靠
-    if ! command -v acme.sh >/dev/null 2>&1; then
+    if ! command -v ~/.acme.sh/acme.sh >/dev/null 2>&1; then
         wget -q -O /tmp/acme.sh https://get.acme.sh 2>/dev/null || true
-        if [ -f /tmp/acme.sh ]; then
-            sh /tmp/acme.sh --install --force >/dev/null 2>&1 || true
-            rm -f /tmp/acme.sh
-        fi
+        [ -f /tmp/acme.sh ] && sh /tmp/acme.sh --install --force >/dev/null 2>&1 || true
+        rm -f /tmp/acme.sh
     fi
 
     CERT_DIR="/etc/sing-box/certs"
     mkdir -p "$CERT_DIR"
 
     if command -v ~/.acme.sh/acme.sh >/dev/null 2>&1; then
-        # 停掉可能占用 80 端口的服务
         rc-service sing-box stop >/dev/null 2>&1 || true
         ~/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --keylength ec-256 \
             --server letsencrypt --email "$EMAIL" >/dev/null 2>&1 || {
-            # 如果 standalone 失败，试试 webroot
             mkdir -p /var/www/html 2>/dev/null
             ~/.acme.sh/acme.sh --issue -d "$DOMAIN" --webroot /var/www/html \
                 --keylength ec-256 --server letsencrypt --email "$EMAIL" >/dev/null 2>&1 || true
         }
-        # 安装证书
         ~/.acme.sh/acme.sh --install-cert -d "$DOMAIN" --ecc \
             --key-file "$CERT_DIR/key.pem" \
             --fullchain-file "$CERT_DIR/fullchain.pem" >/dev/null 2>&1 || {
-            printf "${RED}证书申请失败，请手动申请或换 Reality 协议${PLAIN}\n"
-            printf "${RED}  acme.sh --issue -d ${DOMAIN} --standalone${PLAIN}\n"
-            # 使用自签名降级（仅 Hysteria2 可接受）
+            printf "${RED}证书申请失败${PLAIN}\n"
             openssl req -x509 -nodes -newkey ec:secp384r1 -days 365 \
                 -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/fullchain.pem" \
-                -subj "/CN=${SNI:-$DOMAIN}" -addext "subjectAltName=DNS:${SNI:-$DOMAIN}" 2>/dev/null
+                -subj "/CN=${DOMAIN}" -addext "subjectAltName=DNS:${DOMAIN}" 2>/dev/null
             printf "${YELLOW}使用自签名证书，客户端需跳过验证${PLAIN}\n"
         }
     else
         openssl req -x509 -nodes -newkey ec:secp384r1 -days 365 \
             -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/fullchain.pem" \
             -subj "/CN=${DOMAIN}" -addext "subjectAltName=DNS:${DOMAIN}" 2>/dev/null
-        printf "${YELLOW}acme.sh 安装失败，使用自签名证书（客户端需设为 insecure）${PLAIN}\n"
+        printf "${YELLOW}acme.sh 不可用，使用自签名证书${PLAIN}\n"
     fi
 fi
 
@@ -236,10 +257,18 @@ fi
 # ============================================================
 printf "${BLUE}[6/8] 生成配置...${PLAIN}\n"
 
-# 通用 UUID（VLESS 协议使用）
+# 验证 sing-box 可用
+/usr/local/bin/sing-box version >/dev/null 2>&1 || {
+    printf "${RED}sing-box 不可执行，尝试安装 gcompat${PLAIN}\n"
+    apk add --no-cache gcompat >/dev/null 2>&1 || true
+    /usr/local/bin/sing-box version >/dev/null 2>&1 || {
+        printf "${RED}sing-box 仍无法执行，可能 musl/glibc 不匹配${PLAIN}\n"; exit 1
+    }
+}
+
 UUID=$(/usr/local/bin/sing-box generate uuid 2>/dev/null || cat /proc/sys/kernel/random/uuid)
 
-# Hysteria2 自签名证书（无域名时）
+# Hysteria2 自签名证书
 if [ "$PROTOCOL" = "hysteria2" ]; then
     CERT_DIR="/etc/sing-box/certs"
     mkdir -p "$CERT_DIR"
@@ -398,7 +427,7 @@ esac
 
 # 配置校验
 /usr/local/bin/sing-box check -c /etc/sing-box/config.json >/dev/null 2>&1 || {
-    printf "${RED}配置校验失败${PLAIN}\n"; exit 1
+    printf "${RED}配置文件校验失败${PLAIN}\n"; exit 1
 }
 
 # ============================================================
@@ -445,26 +474,26 @@ start_pre() {
 }
 SERVEOF
 chmod +x /etc/init.d/sing-box
-rc-update add sing-box default >/dev/null 2>&1
-rc-service sing-box restart >/dev/null 2>&1
+rc-update add sing-box default >/dev/null 2>&1 || true
+rc-service sing-box restart >/dev/null 2>&1 || true
 
 # ============================================================
 # 12. 快捷脚本
 # ============================================================
-cat > /usr/local/bin/vps-info << 'INFOEOF'
+cat > /usr/local/bin/vps-info << INFOEOF
 #!/bin/sh
 echo ""
 echo "========== 代理信息 =========="
 echo ""
 INFOEOF
 
-# 追加协议特定的信息
 case "$PROTOCOL" in
     vless-reality)
         cat >> /usr/local/bin/vps-info << INFOEOF
 echo "协议:      VLESS + Reality"
 echo "公网 IP:   $IP"
 echo "端口:      $node_external (内网: $node_internal)"
+echo "SSH:       $ssh_external (内网: $ssh_internal)"
 echo "UUID:      $UUID"
 echo "PublicKey: $PUBLIC_KEY"
 echo "ShortID:   $SHORT_ID"
