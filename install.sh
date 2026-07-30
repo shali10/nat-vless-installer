@@ -239,13 +239,13 @@ if needs_cert; then
             --key-file "$CERT_DIR/key.pem" \
             --fullchain-file "$CERT_DIR/fullchain.pem" >/dev/null 2>&1 || {
             printf "${RED}证书申请失败${PLAIN}\n"
-            openssl req -x509 -nodes -newkey ec:secp384r1 -days 365 \
+            openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
                 -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/fullchain.pem" \
                 -subj "/CN=${DOMAIN}" -addext "subjectAltName=DNS:${DOMAIN}" 2>/dev/null
             printf "${YELLOW}使用自签名证书，客户端需跳过验证${PLAIN}\n"
         }
     else
-        openssl req -x509 -nodes -newkey ec:secp384r1 -days 365 \
+        openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
             -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/fullchain.pem" \
             -subj "/CN=${DOMAIN}" -addext "subjectAltName=DNS:${DOMAIN}" 2>/dev/null
         printf "${YELLOW}acme.sh 不可用，使用自签名证书${PLAIN}\n"
@@ -274,7 +274,7 @@ if [ "$PROTOCOL" = "hysteria2" ]; then
     mkdir -p "$CERT_DIR"
     if [ ! -f "$CERT_DIR/fullchain.pem" ]; then
         SNI=${SNI:-"www.bing.com"}
-        openssl req -x509 -nodes -newkey ec:secp384r1 -days 365 \
+        openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
             -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/fullchain.pem" \
             -subj "/CN=${SNI}" -addext "subjectAltName=DNS:${SNI}" 2>/dev/null
     fi
@@ -385,7 +385,8 @@ EOF
         ;;
 
     shadowsocks)
-        METHOD="2022-blake3-aes-128-gcm"
+        METHOD="none"
+        PASSWORD=$(openssl rand -base64 16 | tr -d '=+/')
         cat > /etc/sing-box/config.json << EOF
 {
   "log": {"level": "warn"},
