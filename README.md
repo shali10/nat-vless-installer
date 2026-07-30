@@ -10,9 +10,22 @@
 curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | bash
 ```
 
-然后按照提示选择协议、输入端口即可。
+然后按照提示完成安装。
 
 > 💡 首次运行会自动使用 TUI 交互界面（whiptail/newt），需要依赖支持：Debian/Ubuntu 装 `whiptail`，Alpine 装 `newt`，CentOS/RHEL 通常自带 whiptail。如果机器上没有这些包，脚本会降级到纯文本模式。
+
+## 特性
+
+| 特性 | 说明 |
+|------|------|
+| **6 种协议** | VLESS+Reality / WS+TLS / TCP+TLS / Hysteria2 / Shadowsocks / Trojan |
+| **TUI 界面** | whiptail 交互菜单，无需手写配置 |
+| **多用户** | 安装时可选用户数量，每个用户独立的 UUID/密码 |
+| **双栈** | 自动检测 IPv4/IPv6，生成双栈链接 |
+| **Warp 解锁** | 可选 Cloudflare Warp 出站，解锁 ChatGPT/Netflix/YouTube/流媒体 |
+| **管理工具** | 装完可用 `sbx` 命令管理节点（增删改查/重启/卸载） |
+| **多系统** | Alpine / Debian / Ubuntu / CentOS / Rocky / AlmaLinux |
+| **musl/glibc** | 自动选择，Alpine 自动用 musl 构建 |
 
 ## 系统要求
 
@@ -20,7 +33,7 @@ curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | 
 |---|---|
 | 系统 | Alpine Linux / Debian / Ubuntu / CentOS / Rocky / AlmaLinux |
 | 架构 | x86_64 / arm64 / armv7 |
-| 网络 | 公网 IPv4（NAT VPS 有映射端口即可） |
+| 网络 | 公网 IPv4 或 IPv6（NAT VPS 有映射端口即可） |
 | 依赖 | 脚本自动安装，无需预先准备 |
 
 > 在 LXC 容器中运行需要 iptables 权限（向宿主要求 `lxc.cap.drop =` 放行 netfilter）。如没有 iptables 权限，脚本会自动跳过防火墙配置，不影响代理运行。
@@ -33,7 +46,9 @@ curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | 
 1️⃣ 选择协议（默认 VLESS + Reality，无需域名）
 2️⃣ 输入节点端口（内网/公网，NAT VPS 格式）
 3️⃣ 输入 SSH 端口（防火墙放行用）
-4️⃣ 等待脚本自动完成
+4️⃣ 输入用户数量（可选，默认 1）
+5️⃣ 等待脚本自动完成
+6️⃣ 可选：添加 Warp 解锁（ChatGPT/Netflix）
 ```
 
 全部自动化，不需要写配置文件、不需要安装证书（Reality / Hysteria2 / Shadowsocks），**开箱即用**。
@@ -60,6 +75,28 @@ SSH 端口 (内网/公网，如 22/43694):   22/43694
 
 脚本会自动放行防火墙、生成配置。
 
+### 双栈说明
+
+自动检测公网 IPv4 和 IPv6，在链接输出中同时包含：
+
+```
+vless://xxx@1.2.3.4:pe#node-v4
+vless://xxx@[2401:abcd::1]:pe#node-v6
+```
+
+没有 IPv6 的机器只输出 IPv4 链接，不会报错。
+
+### Warp 解锁
+
+安装完成后会询问是否添加 Warp 出站。如果选择是，脚本自动：
+
+1. 下载 wgcf → 注册 Cloudflare Warp
+2. 提取 WireGuard 参数
+3. 注入 Sing-box 配置（wireguard 出站 + 域名分流规则）
+4. 解锁：**ChatGPT / Netflix / YouTube / Disney+ / HBO / BBC / Spotify / Abema** 等主流流媒体
+
+失败自动回滚，不影响现有节点。
+
 ## 安装后的管理
 
 装完后系统里会多一个 `sbx` 命令，直接在终端输入即可管理节点：
@@ -67,7 +104,7 @@ SSH 端口 (内网/公网，如 22/43694):   22/43694
 ```bash
 sbx           # 交互菜单
 sbx list      # 列出所有节点
-sbx info      # 查看所有节点连接链接
+sbx info      # 查看所有节点连接链接（双栈 + 用户数 + Warp 状态）
 sbx add       # 添加新节点
 sbx del       # 删除节点
 sbx restart   # 重启 sing-box
@@ -104,27 +141,28 @@ rc-service sing-box stop       # 停止
 ```bash
 /etc/sing-box/config.json      # 主配置
 /etc/sing-box/nodes.conf       # 节点元数据（sbx 管理）
+/etc/sing-box/warp.conf        # Warp WireGuard 配置（启用 Warp 后才有）
 /etc/sing-box/firewall.rules   # 防火墙规则
 ```
 
 ### 完整卸载
 
 ```bash
+sbx uninstall
+```
+
+或手动：
+
+```bash
 # systemd
-systemctl stop sing-box
-systemctl disable sing-box
-rm -f /etc/systemd/system/sing-box.service
-systemctl daemon-reload
+systemctl stop sing-box && systemctl disable sing-box
+rm -f /etc/systemd/system/sing-box.service && systemctl daemon-reload
 
 # OpenRC
-rc-service sing-box stop
-rc-update del sing-box
-rm -f /etc/init.d/sing-box
+rc-service sing-box stop && rc-update del sing-box && rm -f /etc/init.d/sing-box
 
 # 删除文件
-rm -rf /etc/sing-box
-rm -f /usr/local/bin/sing-box
-rm -f /usr/local/bin/vps-info
+rm -rf /etc/sing-box /usr/local/bin/sing-box /usr/local/bin/sbx /usr/local/bin/vps-info
 ```
 
 ## 客户端连接
@@ -142,14 +180,14 @@ rm -f /usr/local/bin/vps-info
 
 ```bash
 curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | bash
-# 1 → Reality → 20000/32090 → 22/43694 → 2 (icloud)
+# 1 → Reality → 20000/32090 → 22/43694 → 2 (icloud) → 1用户 → n (不装Warp)
 ```
 
-**Shadowsocks 直连:**
+**Shadowsocks 多用户 + Warp:**
 
 ```bash
 curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | bash
-# 5 → 30000/43090 → 22/43694
+# 5 → 30000/43090 → 22/43694 → 3用户 → y (装Warp)
 ```
 
 ## 已知限制
@@ -160,10 +198,14 @@ curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | 
 
 ## 更新日志
 
+- ✅ **Warp 解锁** — 可选 Cloudflare Warp 出站，分流解锁流媒体 — 2026-07-31
+- ✅ **双栈 IPv4/IPv6** — 自动检测并输出双栈链接 — 2026-07-31
+- ✅ **多用户** — 安装时可选用户数，每个用户独立凭证 — 2026-07-31
+- ✅ **sbx 管理工具** — 装完可用 `sbx` 管理节点 — 2026-07-31
+- ✅ **交互式 TUI 界面**（whiptail/newt）— 2026-07-31
 - 多系统兼容（Alpine / Debian / Ubuntu / CentOS）
 - 6 种协议支持（Reality / WS+TLS / TCP+TLS / Hysteria2 / Shadowsocks / Trojan）
 - NAT 端口映射
 - 防火墙持久化
 - Alpine musl / glibc 自动选择
 - 卸载入口
-- ✅ **交互式 TUI 界面（whiptail/newt）** — 2026-07-31
