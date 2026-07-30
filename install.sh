@@ -13,7 +13,6 @@ PROTOCOL=""; UUID=""; PASSWORD=""; METHOD=""
 WS_PATH=""; SNI=""; DOMAIN=""
 DISTRO=""; PKG_MGR=""; INIT_SYS=""
 
-clear
 printf "${GREEN}============================================================${PLAIN}\n"
 printf "${GREEN}🚀  NAT VPS 代理一键安装 (Sing-box)${PLAIN}\n"
 printf "${GREEN}     6 种协议 · Alpine/Debian/Ubuntu/CentOS${PLAIN}\n"
@@ -170,10 +169,10 @@ mkdir -p /etc/sing-box
 printf "${BLUE}[3/8] 下载 Sing-box...${PLAIN}\n"
 LATEST_TAG=""
 for i in 1 2 3; do
-    LATEST_TAG=$(curl -sL --connect-timeout 5 -H "Accept: application/vnd.github+json" \
+    LATEST_TAG=$(curl -sL --connect-timeout 10 -H "Accept: application/vnd.github+json" \
         "https://api.github.com/repos/SagerNet/sing-box/releases/latest" 2>/dev/null \
         | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    [ -n "$LATEST_TAG" ] && break; sleep 1
+    [ -n "$LATEST_TAG" ] && break; sleep 2
 done
 [ -z "$LATEST_TAG" ] && LATEST_TAG="v1.10.1"
 VERSION=${LATEST_TAG#v}
@@ -182,7 +181,7 @@ LIBC_SUFFIX=""; [ "$IS_MUSL" = "1" ] && LIBC_SUFFIX="-musl"
 DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/${LATEST_TAG}/sing-box-${VERSION}-linux-${SINGBOX_ARCH}${LIBC_SUFFIX}.tar.gz"
 
 printf "${BLUE}  下载: sing-box ${VERSION} (${SINGBOX_ARCH}${LIBC_SUFFIX})${PLAIN}\n"
-if ! wget -q -O /tmp/sing-box.tar.gz "$DOWNLOAD_URL" || [ ! -s /tmp/sing-box.tar.gz ]; then
+if ! wget -q -O /tmp/sing-box.tar.gz --timeout=30 "$DOWNLOAD_URL" || [ ! -s /tmp/sing-box.tar.gz ]; then
     # glibc 降级
     if [ "$IS_MUSL" = "1" ]; then
         printf "${YELLOW}  musl 下载失败，降级 glibc${PLAIN}\n"
@@ -206,7 +205,7 @@ rm -rf /tmp/sing-box.tar.gz "/tmp/sing-box-${VERSION}-linux-${SINGBOX_ARCH}${LIB
 # 7. 公网 IP
 # ============================================================
 printf "${BLUE}[4/8] 获取公网 IP...${PLAIN}\n"
-IP=$(curl -s4 --connect-timeout 5 icanhazip.com || curl -s4 --connect-timeout 5 ip.sb || curl -s4 --connect-timeout 5 api.ipify.org)
+IP=$(curl -s4 --connect-timeout 10 icanhazip.com || curl -s4 --connect-timeout 10 ip.sb || curl -s4 --connect-timeout 10 api.ipify.org)
 [ -z "$IP" ] && { printf "${RED}无法获取公网 IP${PLAIN}\n"; exit 1; }
 
 # ============================================================
@@ -214,7 +213,7 @@ IP=$(curl -s4 --connect-timeout 5 icanhazip.com || curl -s4 --connect-timeout 5 
 # ============================================================
 if needs_cert; then
     printf "${BLUE}[5/8] 申请 TLS 证书 (Let\'s Encrypt)...${PLAIN}\n"
-    DOMAIN_IP=$(curl -sL --connect-timeout 5 "https://cloudflare-dns.com/dns-query?name=${DOMAIN}&type=A" \
+    DOMAIN_IP=$(curl -sL --connect-timeout 10 "https://cloudflare-dns.com/dns-query?name=${DOMAIN}&type=A" \
         -H "Accept: application/dns-json" 2>/dev/null | sed 's/.*"data":"\([^"]*\)".*/\1/')
     [ -z "$DOMAIN_IP" ] && DOMAIN_IP=$(nslookup "$DOMAIN" 2>/dev/null | awk '/^Address: /{print $2}' | tail -1)
     if [ "$DOMAIN_IP" != "$IP" ]; then
