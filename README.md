@@ -12,6 +12,8 @@ curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | 
 
 然后按照提示选择协议、输入端口即可。
 
+> 💡 首次运行会自动使用 TUI 交互界面（whiptail/newt），需要依赖支持：Debian/Ubuntu 装 `whiptail`，Alpine 装 `newt`，CentOS/RHEL 通常自带 whiptail。如果机器上没有这些包，脚本会降级到纯文本模式。
+
 ## 系统要求
 
 | 项目 | 要求 |
@@ -21,8 +23,7 @@ curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | 
 | 网络 | 公网 IPv4（NAT VPS 有映射端口即可） |
 | 依赖 | 脚本自动安装，无需预先准备 |
 
-> 在 LXC 容器中运行需要 iptables 权限（向宿主要求 `lxc.cap.drop =` 放行 netfilter）。
-> 如没有 iptables 权限，脚本会自动跳过防火墙配置，不影响代理运行。
+> 在 LXC 容器中运行需要 iptables 权限（向宿主要求 `lxc.cap.drop =` 放行 netfilter）。如没有 iptables 权限，脚本会自动跳过防火墙配置，不影响代理运行。
 
 ## 使用流程
 
@@ -54,7 +55,7 @@ NAT VPS 的内网端口和公网端口通常不同，按 `内网端口/公网端
 
 ```
 节点端口 (内网/公网，如 20000/32090): 20000/32090
-SSH 端口  (内网/公网，如 22/43694):   22/43694
+SSH 端口 (内网/公网，如 22/43694):   22/43694
 ```
 
 脚本会自动放行防火墙、生成配置。
@@ -67,7 +68,7 @@ SSH 端口  (内网/公网，如 22/43694):   22/43694
 vps-info
 ```
 
-显示协议、IP、端口、UUID 等连接信息。
+显示协议、IP、端口、UUID等连接信息。
 
 ### 服务管理
 
@@ -154,3 +155,4 @@ curl -fsSL https://github.com/shali10/nat-vless-installer/raw/main/install.sh | 
 - 防火墙持久化
 - Alpine musl / glibc 自动选择
 - 卸载入口
+- ✅ **交互式 TUI 界面（whiptail/newt）** — 2026-07-31

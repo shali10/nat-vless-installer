@@ -58,17 +58,39 @@ fi
 printf "${BLUE}[环境] ${DISTRO} | ${SINGBOX_ARCH} | ${VTYPE} | musl=$IS_MUSL | ${INIT_SYS}${PLAIN}\n\n"
 
 # ============================================================
-# 2. 协议选择
+# 2. 协议选择 (使用 whiptail 菜单界面)
 # ============================================================
-printf "${YELLOW}请选择协议:${PLAIN}\n"
-echo "1) VLESS + Reality (xtls-rprx-vision)   — 最隐蔽，无需域名 ← 推荐"
-echo "2) VLESS + WebSocket + TLS              — 可套 CDN，需域名+证书"
-echo "3) VLESS + TCP + TLS                    — 标准 TLS，需域名+证书"
-echo "4) Hysteria2                            — QUIC 暴力加速"
-echo "5) Shadowsocks + AEAD                   — 轻量经典"
-echo "6) Trojan + TLS                         — 传统稳定，需域名+证书"
-printf "选择 [1-6] (默认 1): "
-read proto_choice
+
+# 检测 whiptail/newt
+WHIPTAIL_CMD=""
+if command -v whiptail >/dev/null 2>&1; then
+    WHIPTAIL_CMD="whiptail"
+elif command -v newt >/dev/null 2>&1; then
+    WHIPTAIL_CMD="newt"
+fi
+
+if [ -n "$WHIPTAIL_CMD" ]; then
+    # TUI 模式 — whiptail 直接操作 /dev/tty
+    proto_choice=$(eval "$WHIPTAIL_CMD" --menu "选择协议" 0 0 0 \
+        1 "VLESS + Reality (无需域名，推荐)" \
+        2 "VLESS + WebSocket + TLS (需套 CDN+域名)" \
+        3 "VLESS + TCP + TLS (标准 TLS)" \
+        4 "Hysteria2 (高丢包加速)" \
+        5 "Shadowsocks (轻量经典)" \
+        6 "Trojan + TLS (传统稳定)" \
+        --default-item 1 2>&1 /dev/tty | grep -oE '^[0-9]+$' || echo 1)
+else
+    # fallback: 纯文本菜单
+    printf "${YELLOW}请选择协议:${PLAIN}\n"
+    echo "1) VLESS + Reality (xtls-rprx-vision)   — 最隐蔽，无需域名 ← 推荐"
+    echo "2) VLESS + WebSocket + TLS              — 可套 CDN，需域名+证书"
+    echo "3) VLESS + TCP + TLS                    — 标准 TLS，需域名+证书"
+    echo "4) Hysteria2                            — QUIC 暴力加速"
+    echo "5) Shadowsocks + AEAD                   — 轻量经典"
+    echo "6) Trojan + TLS                         — 传统稳定，需域名+证书"
+    printf "选择 [1-6] (默认 1): "
+    read -r proto_choice
+fi
 case "${proto_choice:-1}" in
     2) PROTOCOL="vless-ws"      ;;
     3) PROTOCOL="vless-tcp"     ;;
@@ -82,43 +104,113 @@ printf "${GREEN}→ 协议: ${PROTOCOL}${PLAIN}\n\n"
 # ============================================================
 # 3. 输入
 # ============================================================
-while true; do
-    printf "${YELLOW}节点端口 (内网/公网，如 20000/32090): ${PLAIN}"
-    read node_input; [ -z "$node_input" ] && continue
-    node_internal=$(echo "$node_input" | cut -d'/' -f1)
-    node_external=$(echo "$node_input" | cut -d'/' -f2)
-    echo "$node_internal" | grep -qE '^[0-9]+$' && echo "$node_external" | grep -qE '^[0-9]+$' && break
-    printf "${RED}格式错误，请按 内网端口/公网端口 输入数字${PLAIN}\n"
-done
+# ============================================================
+# 3. 输入 (使用 whiptail TUI，兼容 fallback)
+# ============================================================
 
-while true; do
-    printf "${YELLOW}SSH 端口 (内网/公网，如 22/43694): ${PLAIN}"
-    read ssh_input; [ -z "$ssh_input" ] && continue
-    ssh_internal=$(echo "$ssh_input" | cut -d'/' -f1)
-    ssh_external=$(echo "$ssh_input" | cut -d'/' -f2)
-    echo "$ssh_internal" | grep -qE '^[0-9]+$' && echo "$ssh_external" | grep -qE '^[0-9]+$' && break
-    printf "${RED}格式错误，请按 内网端口/公网端口 输入数字${PLAIN}\n"
-done
+# 函数: 节点端口输入 (内网/公网)
+read_node_port() {
+    local prompt="节点端口 (内网/公网，如 20000/32090)"
+    while true; do
+        if [ -n "$WHIPTAIL_CMD" ]; then
+            input=$(eval "$WHIPTAIL_CMD" --input-box "$prompt" 8 60 "" 2>&1 /dev/tty | grep -v '^$')
+        else
+            printf "${YELLOW}${prompt}:${PLAIN}\n"
+            read -r input
+        fi
+        [ -z "$input" ] && continue
+        in=$(echo "$input" | cut -d'/' -f1)
+        ex=$(echo "$input" | cut -d'/' -f2)
+        echo "$in" | grep -qE '^[0-9]+$' && echo "$ex" | grep -qE '^[0-9]+$' && break
+        if [ -n "$WHIPTAIL_CMD" ]; then
+            eval "$WHIPTAIL_CMD" --msgbox "格式错误，请按 \"内网/公网\" 输入数字" 6 40 2>&1 /dev/tty || true
+        else
+            printf "${RED}格式错误，请按 内网端口/公网端口 输入数字${PLAIN}\n"
+        fi
+    done
+    echo "$in/$ex"
+}
 
+# 函数: SSH 端口输入 (内网/公网)
+read_ssh_port() {
+    local prompt="SSH 端口 (内网/公网，如 22/43694)"
+    while true; do
+        if [ -n "$WHIPTAIL_CMD" ]; then
+            input=$(eval "$WHIPTAIL_CMD" --input-box "$prompt" 8 60 "" 2>&1 /dev/tty | grep -v '^$')
+        else
+            printf "${YELLOW}${prompt}:${PLAIN}\n"
+            read -r input
+        fi
+        [ -z "$input" ] && continue
+        in=$(echo "$input" | cut -d'/' -f1)
+        ex=$(echo "$input" | cut -d'/' -f2)
+        echo "$in" | grep -qE '^[0-9]+$' && echo "$ex" | grep -qE '^[0-9]+$' && break
+        if [ -n "$WHIPTAIL_CMD" ]; then
+            eval "$WHIPTAIL_CMD" --msgbox "格式错误，请按 \"内网/公网\" 输入数字" 6 40 2>&1 /dev/tty || true
+        else
+            printf "${RED}格式错误，请按 内网端口/公网端口 输入数字${PLAIN}\n"
+        fi
+    done
+    echo "$in/$ex"
+}
+
+node_input=$(read_node_port)
+node_internal=$(echo "$node_input" | cut -d'/' -f1)
+node_external=$(echo "$node_input" | cut -d'/' -f2)
+
+ssh_input=$(read_ssh_port)
+ssh_internal=$(echo "$ssh_input" | cut -d'/' -f1)
+ssh_external=$(echo "$ssh_input" | cut -d'/' -f2)
+
+# ============================================================
+# SNI 选择 (TUI 菜单)
+# ============================================================
 if [ "$PROTOCOL" = "vless-reality" ]; then
-    printf "${YELLOW}SNI 伪装域名:${PLAIN}\n"
-    echo "1) www.yahoo.com"; echo "2) www.icloud.com"; echo "3) 自定义"
-    printf "选择 [1-3] (默认 2): "; read sni_choice
+    if [ -n "$WHIPTAIL_CMD" ]; then
+        sni_choice=$(eval "$WHIPTAIL_CMD" --menu "选择 SNI 伪装域名" 0 0 0 \
+            1 "www.yahoo.com" \
+            2 "www.icloud.com (推荐)" \
+            3 "自定义" \
+            --default-item 2 2>&1 /dev/tty | grep -oE '^[0-9]+$' || echo 2)
+    else
+        printf "${YELLOW}SNI 伪装域名:${PLAIN}\n"
+        echo "1) www.yahoo.com"; echo "2) www.icloud.com"; echo "3) 自定义"
+        printf "选择 [1-3] (默认 2): "
+        read -r sni_choice
+    fi
     case "$sni_choice" in
         1) SNI="www.yahoo.com" ;;
-        3) printf "自定义 SNI: "; read custom_sni; SNI=${custom_sni:-"www.icloud.com"} ;;
+        3) printf "自定义 SNI: "; read -r custom_sni; SNI=${custom_sni:-"www.icloud.com"} ;;
         *) SNI="www.icloud.com" ;;
     esac
 fi
 
 needs_cert() { case "$PROTOCOL" in vless-ws|vless-tcp|trojan) return 0;; *) return 1;; esac; }
+
 if needs_cert; then
-    printf "${YELLOW}域名 (A 记录指向本机): ${PLAIN}"; read DOMAIN
-    [ -z "$DOMAIN" ] && { printf "${RED}域名不能为空${PLAIN}\n"; exit 1; }
-    printf "${YELLOW}邮箱 (Let\'s Encrypt 用): ${PLAIN}"; read EMAIL; EMAIL=${EMAIL:-"admin@${DOMAIN}"}
+    if [ -n "$WHIPTAIL_CMD" ]; then
+        DOMAIN=$(eval "$WHIPTAIL_CMD" --input-box "域名 (A 记录指向本机)" 8 60 "" 2>&1 /dev/tty | grep -v '^$')
+        [ -z "$DOMAIN" ] && { eval "$WHIPTAIL_CMD" --msgbox "域名不能为空" 6 40 2>&1 /dev/tty || true; exit 1; }
+        EMAIL=$(eval "$WHIPTAIL_CMD" --input-box "Let's Encrypt 邮箱" 8 60 "admin@${DOMAIN}" 2>&1 /dev/tty | grep -v '^$')
+        EMAIL=${EMAIL:-"admin@${DOMAIN}"}
+    else
+        printf "${YELLOW}域名 (A 记录指向本机): ${PLAIN}\n"
+        read -r DOMAIN
+        [ -z "$DOMAIN" ] && { printf "${RED}域名不能为空${PLAIN}\n"; exit 1; }
+        printf "${YELLOW}邮箱 (Let's Encrypt 用): ${PLAIN}\n"
+        read -r EMAIL; EMAIL=${EMAIL:-"admin@${DOMAIN}"}
+    fi
 fi
 
-[ "$PROTOCOL" = "vless-ws" ] && { printf "${YELLOW}WS 路径 (默认 /vless): ${PLAIN}"; read WS_PATH; WS_PATH=${WS_PATH:-"/vless"}; }
+[ "$PROTOCOL" = "vless-ws" ] && {
+    if [ -n "$WHIPTAIL_CMD" ]; then
+        WS_PATH=$(eval "$WHIPTAIL_CMD" --input-box "WS 路径 (默认 /vless)" 8 60 "/vless" 2>&1 /dev/tty | grep -v '^$')
+        WS_PATH=${WS_PATH:-"/vless"}
+    else
+        printf "${YELLOW}WS 路径 (默认 /vless): ${PLAIN}\n"
+        read -r WS_PATH; WS_PATH=${WS_PATH:-"/vless"}
+    fi
+}
 if [ "$PROTOCOL" = "shadowsocks" ] || [ "$PROTOCOL" = "hysteria2" ] || [ "$PROTOCOL" = "trojan" ]; then
     PASSWORD=$(openssl rand -base64 16 | tr -d '=+/')
 fi
