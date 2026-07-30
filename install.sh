@@ -6,7 +6,6 @@
 # 仓库: https://github.com/shali10/nat-vless-installer
 # ============================================================
 
-set -e
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; PLAIN='\033[0m'
 PROTOCOL=""; UUID=""; PASSWORD=""; METHOD=""
@@ -395,62 +394,105 @@ fi
 # ============================================================
 # 12. 快捷查询
 # ============================================================
-# 生成 vps-info 快捷查询脚本
-vps_info_body() {
-    echo "协议:      ${1}"
-    echo "${2}"
-    echo "端口:      ${3}"
-    echo "${4}"
-    echo ""
-    echo "客户端链接:"
-    echo "${5}"
-    echo ""
-}
-
-VPS_LINE1=""; VPS_LINE2=""; VPS_LINE3=""; VPS_LINE4=""; VPS_LINE5=""
-case "$PROTOCOL" in
-    vless-reality)
-        VPS_LINE1="VLESS + Reality"
-        VPS_LINE2="公网 IP:   $IP"
-        VPS_LINE3="$node_external (内网: $node_internal)"
-        VPS_LINE4="SSH: $ssh_external | UUID: $UUID | PublicKey: $PUBLIC_KEY | SNI: $SNI"
-        VPS_LINE5="vless://$UUID@$IP:$node_external?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORT_ID&type=tcp#NAT-${PROTOCOL}"
-        ;;
-    vless-ws)
-        VPS_LINE1="VLESS + WebSocket + TLS"; VPS_LINE2="域名: $DOMAIN"
-        VPS_LINE3="$node_external"; VPS_LINE4="UUID: $UUID | WS: ${WS_PATH:-/vless}"
-        VPS_LINE5="vless://$UUID@$DOMAIN:$node_external?encryption=none&security=tls&type=ws&path=${WS_PATH:-/vless}&host=$DOMAIN&sni=$DOMAIN#NAT-${PROTOCOL}"
-        ;;
-    vless-tcp)
-        VPS_LINE1="VLESS + TCP + TLS"; VPS_LINE2="域名: $DOMAIN"
-        VPS_LINE3="$node_external"; VPS_LINE4="UUID: $UUID"
-        VPS_LINE5="vless://$UUID@$DOMAIN:$node_external?encryption=none&security=tls&type=tcp&sni=$DOMAIN#NAT-${PROTOCOL}"
-        ;;
-    hysteria2)
-        VPS_LINE1="Hysteria2"; VPS_LINE2="公网 IP:   $IP"
-        VPS_LINE3="$node_external (内网: $node_internal)"; VPS_LINE4="密码: $PASSWORD | SNI: ${SNI:-www.bing.com}"
-        VPS_LINE5="hy2://$PASSWORD@$IP:$node_external?insecure=1&sni=${SNI:-www.bing.com}#NAT-${PROTOCOL}"
-        ;;
-    shadowsocks)
-        VPS_LINE1="Shadowsocks (无加密)"; VPS_LINE2="公网 IP:   $IP"
-        VPS_LINE3="$node_external (内网: $node_internal)"; VPS_LINE4="密码: $PASSWORD"
-        VPS_LINE5="ss://$(printf '%s' "none:$PASSWORD" | base64 -w0)@$IP:$node_external#NAT-${PROTOCOL}"
-        ;;
-    trojan)
-        VPS_LINE1="Trojan + TLS"; VPS_LINE2="域名: $DOMAIN"
-        VPS_LINE3="$node_external"; VPS_LINE4="密码: $PASSWORD"
-        VPS_LINE5="trojan://$PASSWORD@$DOMAIN:$node_external?security=tls&sni=$DOMAIN#NAT-${PROTOCOL}"
-        ;;
-esac
-
-cat > /usr/local/bin/vps-info << VPSEOF
+cat > /usr/local/bin/vps-info << 'INFOEOF'
 #!/bin/sh
 echo ""
 echo "========== 代理信息 =========="
 echo ""
-vps_info_body "$VPS_LINE1" "$VPS_LINE2" "$VPS_LINE3" "$VPS_LINE4" "$VPS_LINE5"
-VPSEOF
+INFOEOF
+
+case "$PROTOCOL" in
+    vless-reality)
+        cat >> /usr/local/bin/vps-info << INFOEOF
+echo "协议:      VLESS + Reality"
+echo "公网 IP:   $IP"
+echo "端口:      $node_external (内网: $node_internal)"
+echo "SSH:       $ssh_external (内网: $ssh_internal)"
+echo "UUID:      $UUID"
+echo "PublicKey: $PUBLIC_KEY"
+echo "ShortID:   $SHORT_ID"
+echo "SNI:       $SNI"
+echo ""
+echo "客户端链接:"
+echo "vless://$UUID@$IP:$node_external?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORT_ID&type=tcp#NAT-${PROTOCOL}"
+echo ""
+INFOEOF
+        ;;
+    vless-ws)
+        cat >> /usr/local/bin/vps-info << INFOEOF
+echo "协议:      VLESS + WebSocket + TLS"
+echo "域名:      $DOMAIN"
+echo "端口:      $node_external"
+echo "UUID:      $UUID"
+echo "WS 路径:   ${WS_PATH:-/vless}"
+echo ""
+echo "客户端链接:"
+echo "vless://$UUID@$DOMAIN:$node_external?encryption=none&security=tls&type=ws&path=${WS_PATH:-/vless}&host=$DOMAIN&sni=$DOMAIN#NAT-${PROTOCOL}"
+echo ""
+INFOEOF
+        ;;
+    vless-tcp)
+        cat >> /usr/local/bin/vps-info << INFOEOF
+echo "协议:      VLESS + TCP + TLS"
+echo "域名:      $DOMAIN"
+echo "端口:      $node_external"
+echo "UUID:      $UUID"
+echo ""
+echo "客户端链接:"
+echo "vless://$UUID@$DOMAIN:$node_external?encryption=none&security=tls&type=tcp&sni=$DOMAIN#NAT-${PROTOCOL}"
+echo ""
+INFOEOF
+        ;;
+    hysteria2)
+        cat >> /usr/local/bin/vps-info << INFOEOF
+echo "协议:      Hysteria2"
+echo "公网 IP:   $IP"
+echo "端口:      $node_external (内网: $node_internal)"
+echo "密码:      $PASSWORD"
+echo "SNI:       ${SNI:-www.bing.com}"
+echo ""
+echo "客户端链接:"
+echo "hy2://$PASSWORD@$IP:$node_external?insecure=1&sni=${SNI:-www.bing.com}#NAT-${PROTOCOL}"
+echo ""
+INFOEOF
+        ;;
+    shadowsocks)
+        cat >> /usr/local/bin/vps-info << INFOEOF
+echo "协议:      Shadowsocks (无加密)"
+echo "公网 IP:   $IP"
+echo "端口:      $node_external (内网: $node_internal)"
+echo "密码:      $PASSWORD"
+echo ""
+echo "客户端链接:"
+echo "ss://$(printf '%s' "none:$PASSWORD" | base64 -w0)@$IP:$node_external#NAT-${PROTOCOL}"
+echo ""
+INFOEOF
+        ;;
+    trojan)
+        cat >> /usr/local/bin/vps-info << INFOEOF
+echo "协议:      Trojan + TLS"
+echo "域名:      $DOMAIN"
+echo "端口:      $node_external"
+echo "密码:      $PASSWORD"
+echo ""
+echo "客户端链接:"
+echo "trojan://$PASSWORD@$DOMAIN:$node_external?security=tls&sni=$DOMAIN#NAT-${PROTOCOL}"
+echo ""
+INFOEOF
+        ;;
+esac
 chmod +x /usr/local/bin/vps-info
+
+# 生成 vps-info
+if command -v /usr/local/bin/sing-box >/dev/null 2>&1; then
+  cat > /usr/local/bin/vps-info << 'SIMPLEEOF'
+#!/bin/sh
+echo ""
+echo "========== 代理信息 (Sing-box) =========="
+echo ""
+SIMPLEEOF
+  chmod +x /usr/local/bin/vps-info
+fi
 
 # ============================================================
 # 完成
