@@ -1,7 +1,6 @@
 #!/bin/sh
 # sbx - NAT VPS 节点管理工具 (Sing-box)
 # 安装: https://github.com/shali10/nat-vless-installer
-set -e
 
 CONFIG="/etc/sing-box/config.json"
 NODES_CONF="/etc/sing-box/nodes.conf"

@@ -62,15 +62,25 @@ SSH 端口 (内网/公网，如 22/43694):   22/43694
 
 ## 安装后的管理
 
-### 查看节点信息
+装完后系统里会多一个 `sbx` 命令，直接在终端输入即可管理节点：
 
 ```bash
-vps-info
+sbx           # 交互菜单
+sbx list      # 列出所有节点
+sbx info      # 查看所有节点连接链接
+sbx add       # 添加新节点
+sbx del       # 删除节点
+sbx restart   # 重启 sing-box
+sbx logs      # 查看运行日志
+sbx status    # 查看服务状态
+sbx uninstall # 完整卸载
 ```
 
-显示协议、IP、端口、UUID等连接信息。
+兼容旧版：`vps-info` 仍然可用（等同 `sbx info`）。
 
-### 服务管理
+### 服务管理（备用）
+
+除了 sbx，也支持 systemctl / rc-service 原生管理：
 
 **systemd 系统（Debian/Ubuntu/CentOS）:**
 
@@ -93,6 +103,7 @@ rc-service sing-box stop       # 停止
 
 ```bash
 /etc/sing-box/config.json      # 主配置
+/etc/sing-box/nodes.conf       # 节点元数据（sbx 管理）
 /etc/sing-box/firewall.rules   # 防火墙规则
 ```
 
